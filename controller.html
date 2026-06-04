@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>memory.capture // remote</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Caveat:wght@600&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:      #07070d;
+      --surface: #0d0d19;
+      --border:  #1a1a2e;
+      --text:    #e8e4dc;
+      --muted:   #4e4d6c;
+      --dim:     #2a293c;
+      --teal:    #5ce1c8;
+      --gold:    #f5c464;
+      --green:   #4dde9a;
+      --red:     #f87171;
+      --mono:    'JetBrains Mono', monospace;
+      --hand:    'Caveat', cursive;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      overflow: hidden;
+      -webkit-user-select: none; user-select: none;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── LAYOUT ─────────────────────────── */
+    .page {
+      display: flex; flex-direction: column;
+      height: 100vh; height: 100dvh;
+    }
+
+    /* ── STATUS BAR ─────────────────────── */
+    .statusbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .app-name { font-size: 11px; letter-spacing: 0.2em; color: var(--muted); }
+    .app-name b { color: var(--teal); font-weight: 400; }
+
+    .conn-badge {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 10px; letter-spacing: 0.18em;
+    }
+    .badge-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.4s ease;
+    }
+    .badge-dot.connecting { background: var(--gold); animation: blink 1s step-end infinite; }
+    .badge-dot.connected  { background: var(--green); animation: none; }
+    .badge-dot.live       { background: var(--red);   animation: blink 1s step-end infinite; }
+    .badge-dot.done       { background: var(--teal);  animation: none; }
+    @keyframes blink { 50% { opacity: 0.15; } }
+
+    #badge-label { color: var(--muted); }
+
+    /* ── CAMERA PREVIEW ─────────────────── */
+    .cam-wrap {
+      position: relative;
+      width: 100%; flex-shrink: 0;
+      aspect-ratio: 1;
+      background: #000;
+      overflow: hidden;
+    }
+
+    #local-video {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+      /* transform is set dynamically in JS for rotation + mirror */
+    }
+
+    /* Corner brackets */
+    .corners { position: absolute; inset: 0; pointer-events: none; }
+    .corners::before,
+    .corners::after {
+      content: '';
+      position: absolute;
+      width: 22px; height: 22px;
+      border-style: solid;
+      border-color: var(--teal);
+      opacity: 0.55;
+    }
+    .corners::before { top: 10px; left: 10px; border-width: 2px 0 0 2px; }
+    .corners::after  { bottom: 10px; right: 10px; border-width: 0 2px 2px 0; }
+
+    .corner-br { position: absolute; bottom: 10px; left: 10px; width: 22px; height: 22px; border: 2px solid var(--teal); border-right: none; border-top: none; opacity: 0.55; pointer-events: none; }
+    .corner-tr { position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; border: 2px solid var(--teal); border-left: none; border-bottom: none; opacity: 0.55; pointer-events: none; }
+
+    /* Camera flip button */
+    .cam-flip {
+      position: absolute; bottom: 12px; right: 12px;
+      background: rgba(13,13,25,0.75);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 18px;
+      width: 38px; height: 38px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; border-radius: 50%;
+      backdrop-filter: blur(8px);
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .cam-flip:active { color: var(--teal); border-color: var(--teal); }
+
+    /* ── CONTROLS SECTION ───────────────── */
+    .controls {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 0; padding: 24px 28px;
+      overflow: hidden;
+    }
+
+    /* Panes */
+    .pane {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 22px;
+      width: 100%;
+      animation: fade-in 0.3s ease;
+    }
+    .pane.hide { display: none; }
+    @keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    .pane-msg {
+      font-size: 11px; letter-spacing: 0.14em; color: var(--muted);
+      text-align: center; line-height: 1.7;
+    }
+
+    /* ── BUTTONS ────────────────────────── */
+    .btn-go {
+      appearance: none;
+      background: transparent;
+      border: 1px solid var(--teal);
+      color: var(--teal);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      padding: 16px 44px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn-go:active { background: var(--teal); color: var(--bg); }
+
+    /* Big camera shutter */
+    .shutter-outer {
+      width: 88px; height: 88px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.18);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: border-color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .shutter-outer:active { border-color: rgba(255,255,255,0.5); }
+    .shutter-inner {
+      width: 70px; height: 70px; border-radius: 50%;
+      background: #fff;
+      transition: width 0.1s ease, height 0.1s ease;
+      pointer-events: none;
+    }
+    .shutter-outer:active .shutter-inner { width: 62px; height: 62px; }
+
+    .capture-hint {
+      font-size: 9px; letter-spacing: 0.25em; color: var(--muted);
+    }
+
+    /* Pane: done */
+    .done-label {
+      font-family: var(--hand);
+      font-size: 36px; color: var(--gold);
+    }
+    .btn-reset {
+      appearance: none;
+      background: transparent;
+      border: 1px solid var(--dim);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      padding: 12px 32px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-reset:active { border-color: var(--muted); color: var(--text); }
+
+    /* ── ERROR / NO ROOM ────────────────── */
+    #no-room {
+      display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      height: 100vh; gap: 18px; padding: 40px; text-align: center;
+    }
+    .err-title { font-size: 13px; color: var(--red); letter-spacing: 0.15em; }
+    .err-body  { font-size: 11px; color: var(--muted); line-height: 2; }
+
+    .err-inline {
+      font-size: 10px; color: var(--red); letter-spacing: 0.1em;
+      text-align: center; margin-top: 8px; line-height: 1.6;
+    }
+
+    /* Connecting spinner */
+    .dots span {
+      display: inline-block;
+      animation: dot-pulse 1.2s ease-in-out infinite;
+    }
+    .dots span:nth-child(2) { animation-delay: 0.2s; }
+    .dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dot-pulse { 0%,60%,100%{opacity:0.15} 30%{opacity:1} }
+  </style>
+</head>
+<body>
+
+  <!-- No room ID view -->
+  <div id="no-room">
+    <div class="err-title">// room not found</div>
+    <div class="err-body">scan the QR code on the<br />display screen to connect.</div>
+  </div>
+
+  <!-- Main page -->
+  <div class="page" id="main-page">
+
+    <!-- Status bar -->
+    <div class="statusbar">
+      <div class="app-name"><b>memory</b>.capture</div>
+      <div class="conn-badge">
+        <div class="badge-dot connecting" id="badge-dot"></div>
+        <span id="badge-label">CONNECTING</span>
+      </div>
+    </div>
+
+    <!-- Camera preview -->
+    <div class="cam-wrap">
+      <video id="local-video" autoplay muted playsinline></video>
+      <div class="corners"></div>
+      <div class="corner-br"></div>
+      <div class="corner-tr"></div>
+      <button class="cam-flip" id="btn-flip" title="Flip camera">⟳</button>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+
+      <!-- PANE: connecting -->
+      <div class="pane" id="pane-connecting">
+        <div class="pane-msg">
+          establishing connection<br />
+          <span class="dots"><span>.</span><span>.</span><span>.</span></span>
+        </div>
+      </div>
+
+      <!-- PANE: ready -->
+      <div class="pane hide" id="pane-ready">
+        <div class="pane-msg">connected to display.<br />tap when ready to go live.</div>
+        <button class="btn-go" id="btn-go-live">GO LIVE →</button>
+      </div>
+
+      <!-- PANE: live -->
+      <div class="pane hide" id="pane-live">
+        <div class="pane-msg">camera is live on screen.</div>
+        <div class="shutter-outer" id="btn-capture">
+          <div class="shutter-inner"></div>
+        </div>
+        <div class="capture-hint">TAP TO CAPTURE</div>
+      </div>
+
+      <!-- PANE: done -->
+      <div class="pane hide" id="pane-done">
+        <div class="done-label">✦ memory saved.</div>
+        <div class="pane-msg">moment captured and sent to screen.</div>
+        <button class="btn-reset" id="btn-reset">RESET</button>
+      </div>
+
+      <!-- Inline error -->
+      <div class="err-inline hide" id="err-inline"></div>
+
+    </div>
+  </div>
+
+
+  <script>
+  const params = new URLSearchParams(location.search);
+  const roomId = params.get('room');
+
+  if (!roomId) {
+    document.getElementById('main-page').style.display = 'none';
+    document.getElementById('no-room').style.display   = 'flex';
+  } else {
+    boot();
+  }
+
+  /* ═══════════════════════════════════════════
+     BOOT
+  ═══════════════════════════════════════════ */
+  function boot() {
+    const localVideo = document.getElementById('local-video');
+    let localStream = null;
+    let dataConn    = null;
+    let currentFace = 'user'; // or 'environment'
+
+    const DISPLAY_PEER_ID = `farewell2026-${roomId}`;  // must match index.html
+
+    // ── Preview rotation (landscape-aware) ───
+    function updatePreviewTransform() {
+      const vw = localVideo.videoWidth  || 0;
+      const vh = localVideo.videoHeight || 0;
+      const isFront = currentFace === 'user';
+      const videoIsPortrait = vw > 0 && vw < vh;
+
+      if (videoIsPortrait) {
+        // Camera reports portrait dims → rotate +90° for landscape display
+        localVideo.style.transform = isFront
+          ? 'rotate(90deg) scaleX(-1)'
+          : 'rotate(90deg)';
+      } else {
+        localVideo.style.transform = isFront ? 'scaleX(-1)' : 'none';
+      }
+    }
+    localVideo.addEventListener('playing', updatePreviewTransform);
+    localVideo.addEventListener('resize',  updatePreviewTransform);
+
+    // ── Camera access ────────────────────────
+    async function startCamera(facingMode) {
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+        localVideo.srcObject = localStream;
+        return localStream;
+      } catch (e) {
+        showErr('camera error: ' + e.message);
+        return null;
+      }
+    }
+
+    // ── Camera flip ──────────────────────────
+    document.getElementById('btn-flip').addEventListener('click', async () => {
+      currentFace = currentFace === 'user' ? 'environment' : 'user';
+      const stream = await startCamera(currentFace);
+      updatePreviewTransform();
+      if (stream && peer && !peer.destroyed) {
+        peer.call(DISPLAY_PEER_ID, stream);
+      }
+    });
+
+    // ── PeerJS ───────────────────────────────
+    let peer;
+
+    async function connect() {
+      const stream = await startCamera(currentFace);
+      if (!stream) return;
+
+      peer = new Peer({
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+          ]
+        }
+      });
+
+      peer.on('open', () => {
+        // Data channel
+        dataConn = peer.connect(DISPLAY_PEER_ID, { reliable: true });
+
+        dataConn.on('open', () => {
+          setStatus('connected', 'CONNECTED');
+          showPane('ready');
+          hideErr();
+        });
+
+        dataConn.on('error', e => showErr('data error: ' + e.message));
+
+        dataConn.on('close', () => {
+          // Connection dropped — show error but don't auto-reconnect mid-performance
+          setStatus('connecting', 'DISCONNECTED');
+          showErr('connection dropped. reload to reconnect.');
+        });
+
+        // Video call
+        const call = peer.call(DISPLAY_PEER_ID, stream);
+        if (!call) showErr('call failed — is index.html open on the display?');
+        call && call.on('error', e => showErr('call error: ' + e.message));
+      });
+
+      peer.on('error', e => {
+        if (e.type === 'peer-unavailable') {
+          // Display not open yet — retry every 3 s automatically
+          showErr('display not found. retrying…');
+          setTimeout(() => {
+            if (peer && !peer.destroyed) peer.destroy();
+            connect();
+          }, 3000);
+        } else {
+          showErr('peer error: ' + e.type);
+        }
+      });
+    }
+
+    connect();
+
+    // ── Controls ─────────────────────────────
+    document.getElementById('btn-go-live').addEventListener('click', () => {
+      if (!dataConn || !dataConn.open) { showErr('not connected yet.'); return; }
+      dataConn.send({ type: 'go-live' });
+      setStatus('live', 'LIVE');
+      showPane('live');
+    });
+
+    document.getElementById('btn-capture').addEventListener('click', () => {
+      if (!dataConn || !dataConn.open) { showErr('not connected.'); return; }
+      captureAndSend();
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      if (dataConn && dataConn.open) dataConn.send({ type: 'reset' });
+      setStatus('connected', 'CONNECTED');
+      showPane('ready');
+    });
+
+    // ── Capture (hardcoded landscape) ──────────
+    function captureAndSend() {
+      const vid = document.getElementById('local-video');
+      const vw  = vid.videoWidth  || 1280;
+      const vh  = vid.videoHeight || 720;
+
+      // Hardcoded landscape: if camera reports portrait dims (vw < vh),
+      // rotate +90° CW to produce a landscape frame.
+      // User confirmed they will always hold the phone in landscape (-90°).
+      const needsRotation = vw < vh;
+
+      const canvas = document.createElement('canvas');
+      const ctx    = canvas.getContext('2d');
+
+      if (needsRotation) {
+        // Swap dimensions → landscape output
+        canvas.width  = vh;
+        canvas.height = vw;
+        ctx.translate(vh / 2, vw / 2);
+        ctx.rotate(Math.PI / 2);   // +90° clockwise
+        ctx.drawImage(vid, -vw / 2, -vh / 2, vw, vh);
+      } else {
+        canvas.width  = vw;
+        canvas.height = vh;
+        ctx.drawImage(vid, 0, 0, vw, vh);
+      }
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.88);
+      dataConn.send({ type: 'capture', imageData: imgData });
+
+      setStatus('done', 'CAPTURED');
+      showPane('done');
+    }
+
+    // ── Helpers ──────────────────────────────
+    function showPane(name) {
+      ['connecting','ready','live','done'].forEach(p => {
+        document.getElementById(`pane-${p}`).classList.toggle('hide', p !== name);
+      });
+    }
+
+    function setStatus(type, label) {
+      document.getElementById('badge-dot').className = `badge-dot ${type}`;
+      document.getElementById('badge-label').textContent = label;
+    }
+
+    function showErr(msg) {
+      const el = document.getElementById('err-inline');
+      el.textContent = '// ' + msg;
+      el.classList.remove('hide');
+    }
+
+    function hideErr() {
+      document.getElementById('err-inline').classList.add('hide');
+    }
+  }
+  </script>
+</body>
+</html>
