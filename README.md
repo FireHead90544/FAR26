@@ -6,7 +6,16 @@ A two-device WebRTC webapp built for my graduation farewell rampwalk. One page r
 
 No server. No build step. Two static HTML files.
 
+<img width="1874" height="926" alt="demo" src="https://github.com/user-attachments/assets/0ef69e7c-7d4b-4945-8e70-1504465d2f0c" />
+
 > **A small note** — Though neither I had such tech-savvy audience, nor my college would have appreciated this. This is what I'd have loved to showcase at my farewell, had I got the chance & such environment. So, if you've got your farewell & you're deeply hinged into tech, go wild with creativity, feel free to take it to a whole new level & make sure to keep your day memorable! All the best, you're a graduate now 🎉
+
+## Live Demo
+
+A demo showcasing the webapp, minus sending the image over to discord webhook.
+
+- Display: [https://firehead90544.github.io/FAR26/](https://firehead90544.github.io/FAR26/)
+- Controller: [https://firehead90544.github.io/FAR26/controller?room=FAR26](https://firehead90544.github.io/FAR26/controller?room=FAR26)
 
 ---
 
@@ -88,7 +97,7 @@ vercel --yes   # run from inside the project folder
 
 1. Fork the repository.
 2. Go to **Settings → Pages → Source → main branch / root**.
-3. Your site will be at `https://<username>.github.io/FAR26/`.
+3. Your site will be at `https://<username>.github.io/FAR26/` (display) & `https://<username>.github.io/FAR26/controller?room=FAR26` (controller).
 
 > **HTTPS is required** for camera access — all three options above serve HTTPS by default, so you're covered.
 
